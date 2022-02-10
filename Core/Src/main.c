@@ -18,6 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "math.h"
+#define PI 3.1415926
+#include <stdio.h>
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -57,24 +60,52 @@ static void MX_SPI2_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-void init() {
-	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+void drawSine(float f, float phi, float amp, float t) {
+	ssd1306_Fill(White);
+	for( int x = 0; x < 128; x++ ) {
+		int y = amp*sin(2.0*PI*f*( x/128.0*t) + phi) + 64;
+		ssd1306_DrawPixel(x, y, Black);
+	}
+	ssd1306_UpdateScreen();
 }
 
+void testFPS() {
+	uint32_t start = HAL_GetTick();
+	uint32_t end = start;
+	int fps = 0;
+	int phi = 0;
+    do {
+        drawSine(1, phi, 50, 3);
+
+        fps++;
+        phi += 1;
+        end = HAL_GetTick();
+    } while((end - start) < 5000);
+
+    HAL_Delay(3000);
+
+    char buff[64];
+    fps = (float)fps / ((end - start) / 1000.0);
+    snprintf(buff, sizeof(buff), "~%d FPS", fps);
+
+    ssd1306_Fill(White);
+    ssd1306_SetCursor(2, 2);
+    ssd1306_WriteString(buff, Font_11x18, Black);
+    ssd1306_UpdateScreen();
+    HAL_Delay(1000);
+}
+
+void init() {
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+	ssd1306_Init();
+}
+
+
+
 void loop() {
-	// Blue button pressed - repeast the test
-    if(HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == GPIO_PIN_RESET) {
-		// Indicate that test is running
-		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-
-		ssd1306_TestAll();
-
-		HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
-    }
-
-	// Blink an LED
-	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
-	HAL_Delay(150);
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
+	testFPS();
+	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 }
 /* USER CODE END 0 */
 
