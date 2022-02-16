@@ -59,6 +59,14 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define LED_Pin GPIO_PIN_14
 #define LED_GPIO_Port GPIOC
+#define ENCODER_A_Pin GPIO_PIN_15
+#define ENCODER_A_GPIO_Port GPIOA
+#define ENCODER_A_EXTI_IRQn EXTI4_15_IRQn
+#define ENCODER_Z_Pin GPIO_PIN_3
+#define ENCODER_Z_GPIO_Port GPIOB
+#define ENCODER_Z_EXTI_IRQn EXTI2_3_IRQn
+#define ENCODER_B_Pin GPIO_PIN_4
+#define ENCODER_B_GPIO_Port GPIOB
 #define OLED_DC_Pin GPIO_PIN_5
 #define OLED_DC_GPIO_Port GPIOB
 #define OLED_RES_Pin GPIO_PIN_6
