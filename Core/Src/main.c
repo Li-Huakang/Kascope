@@ -26,12 +26,13 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "ssd1306.h"
-#include "ssd1306_tests.h"
+//#include "ssd1306_tests.h"
 #include "stdio.h"
 #include "math.h"
 #define PI 3.1415926
-#define FACTOR_ADC 3.3/4095
 #define ADC_MAX_NUM 2*5
+#define HORIZONTAL_BLOK_NUM 3
+#define VERTICAL_BLOK_NUM 5
 
 /* USER CODE END Includes */
 
@@ -63,58 +64,89 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint16_t adc_value[ADC_MAX_NUM];
 
-void drawSine(float f, float phi, float amp, float t) {
-	ssd1306_Fill(White);
-	for( int x = 0; x < 128; x++ ) {
-		int y = amp*sin(2.0*PI*f*( x/128.0*t) + phi) + 64;
-		ssd1306_DrawPixel(x, y, Black);
-	}
-	ssd1306_UpdateScreen();
-}
 
-void testFPS() {
-	uint32_t start = HAL_GetTick();
-	uint32_t end = start;
-	int fps = 0;
-	int phi = 0;
-    do {
-        drawSine(1, phi, 50, 3);
+//void drawSine(float f, float phi, float amp, float t) {
+//	ssd1306_Fill(White);
+//	for( int x = 0; x < 128; x++ ) {
+//		int y = amp*sin(2.0*PI*f*( x/128.0*t) + phi) + 64;
+//		ssd1306_DrawPixel(x, y, Black);
+//	}
+//	ssd1306_UpdateScreen();
+//}
+//
+//void testFPS() {
+//	uint32_t start = HAL_GetTick();
+//	uint32_t end = start;
+//	int fps = 0;
+//	int phi = 0;
+//    do {
+//        drawSine(1, phi, 50, 3);
+//
+//        fps++;
+//        phi += 1;
+//        end = HAL_GetTick();
+//    } while((end - start) < 5000);
+//
+//    HAL_Delay(3000);
+//
+//    char buff[64];
+//    fps = (float)fps / ((end - start) / 1000.0);
+//    snprintf(buff, sizeof(buff), "~%d FPS", fps);
+//
+//    ssd1306_Fill(White);
+//    ssd1306_SetCursor(2, 2);
+//    ssd1306_WriteString(buff, Font_11x18, Black);
+//    ssd1306_UpdateScreen();
+//    HAL_Delay(1000);
+//}
+int channel_num = 2;
+float adc_factor1 = 1;
+float adc_factor2 = 1;
 
-        fps++;
-        phi += 1;
-        end = HAL_GetTick();
-    } while((end - start) < 5000);
-
-    HAL_Delay(3000);
-
-    char buff[64];
-    fps = (float)fps / ((end - start) / 1000.0);
-    snprintf(buff, sizeof(buff), "~%d FPS", fps);
-
-    ssd1306_Fill(White);
-    ssd1306_SetCursor(2, 2);
-    ssd1306_WriteString(buff, Font_11x18, Black);
-    ssd1306_UpdateScreen();
-    HAL_Delay(1000);
-}
+uint16_t adc_values[ADC_MAX_NUM];
+int plot_values[128];
 
 
 void init() {
-	void adc_dma_start(void){
-			HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_value, ADC_MAX_NUM);
-		}
-	adc_dma_start();
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_value, ADC_MAX_NUM);
 	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 	ssd1306_Init();
 }
 
+//采样转换
+float adc_convert(float adc_value, float factor) {
+	return adc_value*factor;
+}
+
+//画图转换 voltage -> 0-127
+void plot_convert(uint16_t adc_voltages[], float amp_low, float amp_high) {
+	for (int i=0; i<128; i++){
+		plot_values[i] = (adc_voltages[i] - amp_low)/(amp_high - amp_low)*127;
+	}
+}
+
+//更新波形
+void update_plot() {
+	ssd1306_Fill(White);
+	for( int x = 0; x < 128; x++ ) {
+		ssd1306_DrawPixel(x, plot_values[x], Black);
+	}
+	ssd1306_UpdateScreen();
+}
 
 void loop() {
-	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
-	testFPS();
-	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
+	for (int i=0; i<ADC_MAX_NUM; i++){
+			adc_voltages[i] = adc_value[i];
+		}
+	adc_convert(adc_voltages, 3.3/4095);
+	int * p = plot_convert(adc_voltages, 0, 3.3);
+	for (int i = 0; i < 128; i++) {
+		plot_values[i] = *(p+i);
+	}
+	update_plot(plot_values);
+	HAL_Delay(500);
+
 }
 /* USER CODE END 0 */
 
@@ -213,7 +245,7 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 uint32_t previousMillis = 0;
 int num =0;
-int flag = 0;  //标志位
+int flag = 0;  //标志�?
 int CW_1 = 0;
 int CW_2 = 0;
 void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
@@ -233,7 +265,7 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因为 alv,blv必然异步，一高一低。
+			CW_2 = !blv;  //取反是因�? alv,blv必然异步，一高一低�??
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
@@ -260,7 +292,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因为 alv,blv必然异步，一高一低。
+			CW_2 = !blv;  //取反是因�? alv,blv必然异步，一高一低�??
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
