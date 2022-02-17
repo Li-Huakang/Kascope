@@ -21,6 +21,7 @@
 #include "adc.h"
 #include "dma.h"
 #include "spi.h"
+#include "tim.h"
 #include "gpio.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -104,12 +105,16 @@ int channel_num = 2;
 float adc_factor1 = 1;
 float adc_factor2 = 1;
 
-uint16_t adc_values[ADC_MAX_NUM];
+volatile uint16_t adc_values[ADC_MAX_NUM];
 int plot_values[128];
 
 
 void init() {
-	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_value, ADC_MAX_NUM);
+	HAL_TIM_Base_Start(&htim2);
+//	HAL_TIM_OC_Start(&htim2, TIM_CHANNEL_3); //for debug output compare on PA8
+
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_values, ADC_MAX_NUM);
+
 	HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_RESET);
 	ssd1306_Init();
 }
@@ -136,16 +141,16 @@ void update_plot() {
 }
 
 void loop() {
-	for (int i=0; i<ADC_MAX_NUM; i++){
-			adc_voltages[i] = adc_value[i];
-		}
-	adc_convert(adc_voltages, 3.3/4095);
-	int * p = plot_convert(adc_voltages, 0, 3.3);
-	for (int i = 0; i < 128; i++) {
-		plot_values[i] = *(p+i);
-	}
-	update_plot(plot_values);
-	HAL_Delay(500);
+//	for (int i=0; i<ADC_MAX_NUM; i++){
+//			adc_voltages[i] = adc_value[i];
+//		}
+//	adc_convert(adc_voltages, 3.3/4095);
+//	int * p = plot_convert(adc_voltages, 0, 3.3);
+//	for (int i = 0; i < 128; i++) {
+//		plot_values[i] = *(p+i);
+//	}
+//	update_plot(plot_values);
+//	HAL_Delay(500);
 
 }
 /* USER CODE END 0 */
@@ -181,6 +186,7 @@ int main(void)
   MX_SPI2_Init();
   MX_DMA_Init();
   MX_ADC1_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   init();
   /* USER CODE END 2 */
@@ -220,10 +226,10 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = RCC_PLLM_DIV1;
-  RCC_OscInitStruct.PLL.PLLN = 8;
+  RCC_OscInitStruct.PLL.PLLN = 15;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = RCC_PLLQ_DIV2;
-  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV2;
+  RCC_OscInitStruct.PLL.PLLR = RCC_PLLR_DIV4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -243,9 +249,15 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
+	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_values, ADC_MAX_NUM);
+}
+
+
 uint32_t previousMillis = 0;
 int num =0;
-int flag = 0;  //标志�?
+int flag = 0;  //标志�???
 int CW_1 = 0;
 int CW_2 = 0;
 void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
@@ -265,7 +277,7 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因�? alv,blv必然异步，一高一低�??
+			CW_2 = !blv;  //取反是因�??? alv,blv必然异步，一高一低�??
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
@@ -292,7 +304,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因�? alv,blv必然异步，一高一低�??
+			CW_2 = !blv;  //取反是因�??? alv,blv必然异步，一高一低�??
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
