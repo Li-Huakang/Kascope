@@ -34,6 +34,9 @@
 #define ADC_MAX_NUM 2*5
 #define HORIZONTAL_BLOK_NUM 3
 #define VERTICAL_BLOK_NUM 5
+#define MAX_SAMPLE_NUM 256 //最大采样点数
+#define INFO_PIXEL_BOTTOM 10 //屏幕顶端和底端各留10px的空间用于显示信息
+#define INFO_PIXEL_UP 10 //屏幕顶端和底端各留10px的空间用于显示信息
 
 /* USER CODE END Includes */
 
@@ -66,47 +69,21 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-
-//void drawSine(float f, float phi, float amp, float t) {
-//	ssd1306_Fill(White);
-//	for( int x = 0; x < 128; x++ ) {
-//		int y = amp*sin(2.0*PI*f*( x/128.0*t) + phi) + 64;
-//		ssd1306_DrawPixel(x, y, Black);
-//	}
-//	ssd1306_UpdateScreen();
-//}
-//
-//void testFPS() {
-//	uint32_t start = HAL_GetTick();
-//	uint32_t end = start;
-//	int fps = 0;
-//	int phi = 0;
-//    do {
-//        drawSine(1, phi, 50, 3);
-//
-//        fps++;
-//        phi += 1;
-//        end = HAL_GetTick();
-//    } while((end - start) < 5000);
-//
-//    HAL_Delay(3000);
-//
-//    char buff[64];
-//    fps = (float)fps / ((end - start) / 1000.0);
-//    snprintf(buff, sizeof(buff), "~%d FPS", fps);
-//
-//    ssd1306_Fill(White);
-//    ssd1306_SetCursor(2, 2);
-//    ssd1306_WriteString(buff, Font_11x18, Black);
-//    ssd1306_UpdateScreen();
-//    HAL_Delay(1000);
-//}
 int channel_num = 2;
-float adc_factor1 = 1;
-float adc_factor2 = 1;
+
+int time_scale = 10; //ms
+int amp_scale = 1; //V
+
+float adc_factor_1 = (1*3.3/4095);
+float adc_factor_2 = (1*3.3/4095);
 
 volatile uint16_t adc_values[ADC_MAX_NUM];
-int plot_values[128];
+volatile float adc_voltages_1[MAX_SAMPLE_NUM] = {0}; //将采样数据存在数组中
+int adc_voltages_index_1 = 0; //存放指针，到255之后回到0
+volatile float adc_voltages_2[MAX_SAMPLE_NUM] = {0};
+int adc_voltages_index_2 = 0;
+int plot_values_1[128];
+int plot_values_2[128];
 
 
 void init() {
@@ -124,10 +101,13 @@ float adc_convert(float adc_value, float factor) {
 	return adc_value*factor;
 }
 
-//画图转换 voltage -> 0-127
-void plot_convert(uint16_t adc_voltages[], float amp_low, float amp_high) {
+//画图转换 voltage -> (127-bottom, 0+up)
+void plot_convert(float amp_low, float amp_high) {
 	for (int i=0; i<128; i++){
-		plot_values[i] = (adc_voltages[i] - amp_low)/(amp_high - amp_low)*127;
+		plot_values_1[i] = (float)(127-INFO_PIXEL_BOTTOM - INFO_PIXEL_UP)/(amp_low-amp_high)*adc_voltages_1[i]
+			+ 127-INFO_PIXEL_BOTTOM - (127-INFO_PIXEL_BOTTOM - INFO_PIXEL_UP)/(amp_low-amp_high)*amp_low;
+		plot_values_2[i] = (float)(127-INFO_PIXEL_BOTTOM - INFO_PIXEL_UP)/(amp_low-amp_high)*adc_voltages_2[i]
+			+ 127-INFO_PIXEL_BOTTOM - (127-INFO_PIXEL_BOTTOM - INFO_PIXEL_UP)/(amp_low-amp_high)*amp_low;
 	}
 }
 
@@ -135,23 +115,19 @@ void plot_convert(uint16_t adc_voltages[], float amp_low, float amp_high) {
 void update_plot() {
 	ssd1306_Fill(White);
 	for( int x = 0; x < 128; x++ ) {
-		ssd1306_DrawPixel(x, plot_values[x], Black);
+		ssd1306_DrawPixel(x, plot_values_1[x], Black);
+		ssd1306_DrawPixel(x, plot_values_2[x], Black);
 	}
+	ssd1306_Line(0, INFO_PIXEL_UP, 127, INFO_PIXEL_UP, Black);
+	ssd1306_SetCursor(2, 0);
+	ssd1306_WriteString("CHA", Font_7x10, Black);
+	ssd1306_Line(0, 127 - INFO_PIXEL_BOTTOM, 127, 127 - INFO_PIXEL_BOTTOM, Black);
 	ssd1306_UpdateScreen();
 }
 
 void loop() {
-//	for (int i=0; i<ADC_MAX_NUM; i++){
-//			adc_voltages[i] = adc_value[i];
-//		}
-//	adc_convert(adc_voltages, 3.3/4095);
-//	int * p = plot_convert(adc_voltages, 0, 3.3);
-//	for (int i = 0; i < 128; i++) {
-//		plot_values[i] = *(p+i);
-//	}
-//	update_plot(plot_values);
-//	HAL_Delay(500);
-
+	plot_convert(0, 3.3);
+	update_plot();
 }
 /* USER CODE END 0 */
 
@@ -250,14 +226,37 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
+	// 转换完成后，将两个通道的值分别送入adc_voltages_1和adc_voltages_2，并闪烁指示灯
+	float voltage1 = 0;
+	float voltage2 = 0;
+	for (int i=0; i<ADC_MAX_NUM; i++) {
+		if (i%2==0){
+			voltage1 += adc_convert(adc_values[i], adc_factor_1);
+		}
+		if (i%2==1){
+			voltage2 += adc_convert(adc_values[i], adc_factor_2);
+		}
+	}
+	voltage1 = voltage1/(ADC_MAX_NUM/2); //(ADC_MAX_NUM)一定要打括号
+	voltage2 = voltage2/(ADC_MAX_NUM/2);
+	adc_voltages_1[adc_voltages_index_1] = voltage1;
+	adc_voltages_2[adc_voltages_index_2] = voltage2;
+	if (adc_voltages_index_1<256){
+		adc_voltages_index_1++;
+	} else adc_voltages_index_1 = 0;
+	if (adc_voltages_index_2<256){
+			adc_voltages_index_2++;
+		} else adc_voltages_index_2 = 0;
 	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
+
+	// 开始下一次转换
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_values, ADC_MAX_NUM);
 }
 
 
 uint32_t previousMillis = 0;
 int num =0;
-int flag = 0;  //标志�???
+int flag = 0;  //标志位
 int CW_1 = 0;
 int CW_2 = 0;
 void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
@@ -277,7 +276,7 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因�??? alv,blv必然异步，一高一低�??
+			CW_2 = !blv;  //取反是因为 alv,blv必然异步，一高一低
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
@@ -304,7 +303,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因�??? alv,blv必然异步，一高一低�??
+			CW_2 = !blv;  //取反是因为 alv,blv必然异步，一高一低
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
