@@ -31,12 +31,12 @@
 #include "stdio.h"
 #include "math.h"
 #define PI 3.1415926
-#define ADC_MAX_NUM 2*5
-#define HORIZONTAL_BLOK_NUM 3
-#define VERTICAL_BLOK_NUM 5
-#define MAX_SAMPLE_NUM 256 //最大采样点数
-#define INFO_PIXEL_BOTTOM 10 //屏幕顶端和底端各留10px的空间用于显示信息
-#define INFO_PIXEL_UP 10 //屏幕顶端和底端各留10px的空间用于显示信息
+#define ADC_MAX_NUM 2*10 // dma num
+#define HORIZONTAL_BLOK_NUM 3 // max horizontal bolock num on display
+#define VERTICAL_BLOK_NUM 5 // max horizontal bolock num on display
+#define MAX_SAMPLE_NUM 256 //max sample num
+#define INFO_PIXEL_BOTTOM 12 //12px space used to show information on bottom of the display
+#define INFO_PIXEL_UP 12 //12px space used to show information on up of the display
 
 /* USER CODE END Includes */
 
@@ -69,25 +69,55 @@ void SystemClock_Config(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+/*----------------------------*/
+
 int channel_num = 2;
 
-int time_scale = 10; //ms
-int amp_scale = 1; //V
+// FALGS
+// use the flags to switch running modes
 
-float adc_factor_1 = (1*3.3/4095);
-float adc_factor_2 = (1*3.3/4095);
+// 1 for wait; 0 for stop.
+int wait = 1;
 
-volatile uint16_t adc_values[ADC_MAX_NUM];
-volatile float adc_voltages_1[MAX_SAMPLE_NUM] = {0}; //将采样数据存在数组中
-int adc_voltages_index_1 = 0; //存放指针，到255之后回到0
+// 0 for enable both CHA and CHB; 1 for enable CHA only; 2 for enable CHB only; 3 for FFT.
+int chan = 3;
+
+// the number of trigger voltage with unit in millivolt. only CHA can be used to trigger.
+float tri_voltage = 0;
+
+int time_scale = 10; // ms/div
+int amp_scale = 1; // V/div
+
+// 0 for normal; 1 for auto.
+int mode = 0;
+
+// 0 for channel, 1 for trigger, 2 for mode.
+int menu_switch = 0;
+
+int state = 0;
+
+// Variables needed for running.
+
+float adc_factor_1 = (1*3.3/4095); //CHA
+float adc_factor_2 = (1*3.3/4095); //CHB
+
+volatile uint16_t adc_values[ADC_MAX_NUM]; //in dma
+volatile float adc_voltages_1[MAX_SAMPLE_NUM] = {0}; //change adc_values to voltages
+int adc_voltages_index_1 = 0; //pointer in adc_voltages, increase to MAX_SAMPLE_NUM and back to 0
 volatile float adc_voltages_2[MAX_SAMPLE_NUM] = {0};
 int adc_voltages_index_2 = 0;
-int plot_values_1[128];
-int plot_values_2[128];
+int plot_values_1[128]; // CHA plot
+int plot_values_2[128]; // CHB plot
 
+// in interrupt block
+////Calculating sampling frequency
+//int freq_samp = 128/(time_scale*HORIZONTAL_BLOK_NUM);
+
+/*---------------------------*/
 
 void init() {
-	HAL_TIM_Base_Start(&htim2);
+	HAL_TIM_Base_Init(&htim2);
+	HAL_TIM_Base_Start_IT(&htim2);
 //	HAL_TIM_OC_Start(&htim2, TIM_CHANNEL_3); //for debug output compare on PA8
 
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_values, ADC_MAX_NUM);
@@ -96,12 +126,13 @@ void init() {
 	ssd1306_Init();
 }
 
-//采样转换
+//adc convert
 float adc_convert(float adc_value, float factor) {
 	return adc_value*factor;
 }
 
-//画图转换 voltage -> (127-bottom, 0+up)
+//plot convert
+//voltage -> (127-bottom, 0+up)
 void plot_convert(float amp_low, float amp_high) {
 	for (int i=0; i<128; i++){
 		plot_values_1[i] = (float)(127-INFO_PIXEL_BOTTOM - INFO_PIXEL_UP)/(amp_low-amp_high)*adc_voltages_1[i]
@@ -111,16 +142,95 @@ void plot_convert(float amp_low, float amp_high) {
 	}
 }
 
-//更新波形
+//help function
+void float2str(char* str,float value)
+{
+	int Head = (int)value;
+	int Point = (int)((value - Head)*10.0);
+	sprintf(str, "%d.%d", Head, Point);
+
+}
+
+//update plot
 void update_plot() {
+	// update wave
 	ssd1306_Fill(White);
 	for( int x = 0; x < 128; x++ ) {
 		ssd1306_DrawPixel(x, plot_values_1[x], Black);
 		ssd1306_DrawPixel(x, plot_values_2[x], Black);
 	}
 	ssd1306_Line(0, INFO_PIXEL_UP, 127, INFO_PIXEL_UP, Black);
-	ssd1306_SetCursor(2, 0);
-	ssd1306_WriteString("CHA", Font_7x10, Black);
+
+	// update upon info area
+	// wait
+	ssd1306_SetCursor(2, 1);
+	switch (wait) {
+		case 1:
+			ssd1306_WriteString("W", Font_7x10, Black);
+			break;
+		case 0:
+			ssd1306_WriteString("S", Font_7x10, Black);
+			break;
+		default:
+			break;
+	}
+
+	// CH
+	ssd1306_SetCursor(15, 1);
+	switch (chan) {
+		case 0:
+			ssd1306_WriteString("A/B", Font_7x10, Black);
+			break;
+		case 1:
+			ssd1306_WriteString("CHA", Font_7x10, Black);
+			break;
+		case 2:
+			ssd1306_WriteString("CHB", Font_7x10, Black);
+			break;
+		case 3:
+			ssd1306_WriteString("FFT", Font_7x10, Black);
+			break;
+		default:
+			break;
+	}
+
+	//time scale
+	ssd1306_SetCursor(40, 1);
+	char str_time_scale[10] = {0};
+	sprintf(str_time_scale,"%d",time_scale);
+	ssd1306_WriteString(str_time_scale, Font_7x10, Black);
+	ssd1306_WriteString("ms", Font_7x10, Black);
+
+	//amp scale
+	ssd1306_SetCursor(75, 1);
+	char str_amp_scale[10] = {0};
+	sprintf(str_amp_scale,"%d",amp_scale);
+	ssd1306_WriteString(str_amp_scale, Font_7x10, Black);
+	ssd1306_WriteString("V", Font_7x10, Black);
+
+
+	//trigger
+	ssd1306_SetCursor(100, 1);
+	char str_tri_voltage[10];
+	char* p = str_tri_voltage;
+	float2str(p, tri_voltage);
+	ssd1306_WriteString(str_tri_voltage, Font_7x10, Black);
+	ssd1306_WriteString("V", Font_7x10, Black);
+
+	//mode
+	ssd1306_SetCursor(85, 118);
+	switch (mode) {
+		case 0:
+			ssd1306_WriteString("Normal", Font_7x10, Black);
+			break;
+		case 1:
+			ssd1306_WriteString("Auto", Font_7x10, Black);
+			break;
+		default:
+			break;
+	}
+
+
 	ssd1306_Line(0, 127 - INFO_PIXEL_BOTTOM, 127, 127 - INFO_PIXEL_BOTTOM, Black);
 	ssd1306_UpdateScreen();
 }
@@ -226,7 +336,7 @@ void SystemClock_Config(void)
 
 /* USER CODE BEGIN 4 */
 void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
-	// 转换完成后，将两个通道的值分别送入adc_voltages_1和adc_voltages_2，并闪烁指示灯
+	// 转换完成后，将两个�?�道的�?�分别�?�入adc_voltages_1和adc_voltages_2，并闪烁指示�????????
 	float voltage1 = 0;
 	float voltage2 = 0;
 	for (int i=0; i<ADC_MAX_NUM; i++) {
@@ -237,31 +347,46 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc) {
 			voltage2 += adc_convert(adc_values[i], adc_factor_2);
 		}
 	}
-	voltage1 = voltage1/(ADC_MAX_NUM/2); //(ADC_MAX_NUM)一定要打括号
+	voltage1 = voltage1/(ADC_MAX_NUM/2); //(ADC_MAX_NUM)�????????定要打括�????????
 	voltage2 = voltage2/(ADC_MAX_NUM/2);
 	adc_voltages_1[adc_voltages_index_1] = voltage1;
 	adc_voltages_2[adc_voltages_index_2] = voltage2;
-	if (adc_voltages_index_1<256){
+	if (adc_voltages_index_1<MAX_SAMPLE_NUM){
 		adc_voltages_index_1++;
 	} else adc_voltages_index_1 = 0;
-	if (adc_voltages_index_2<256){
+	if (adc_voltages_index_2<MAX_SAMPLE_NUM){
 			adc_voltages_index_2++;
 		} else adc_voltages_index_2 = 0;
 	HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin);
 
-	// 开始下一次转换
+	// �????????始下�????????次转�????????
 	HAL_ADC_Start_DMA(&hadc1, (uint32_t *)adc_values, ADC_MAX_NUM);
 }
 
 
 uint32_t previousMillis = 0;
 int num =0;
-int flag = 0;  //标志位
+int flag = 0;  //标志�????????
 int CW_1 = 0;
 int CW_2 = 0;
 void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
+	if (GPIO_Pin == MENU_Pin) {
+		if (menu_switch<2&&menu_switch>=0) {
+			menu_switch++;
+		}else {
+			menu_switch = 0;
+		}
+	}
 	if (GPIO_Pin == ENCODER_Z_Pin) {
-		num = 0;
+		if (wait==0) {
+			wait = 1;
+		} else {
+			wait = 0;
+		}
+//		__HAL_TIM_DISABLE(&htim2);
+//		 htim2.Instance->CNT=0;
+//		 htim2.Instance->ARR=5000-1;
+//		__HAL_TIM_ENABLE(&htim2);
 	}
 
 	if (GPIO_Pin == ENCODER_A_Pin) {
@@ -276,7 +401,7 @@ void HAL_GPIO_EXTI_Rising_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因为 alv,blv必然异步，一高一低
+			CW_2 = !blv;  //取反是因�???????? alv,blv必然异步，一高一�????????
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
@@ -303,7 +428,7 @@ void HAL_GPIO_EXTI_Falling_Callback(uint16_t GPIO_Pin) {
 			flag = 1;
 		}
 		if (flag && alv) {
-			CW_2 = !blv;  //取反是因为 alv,blv必然异步，一高一低
+			CW_2 = !blv;  //取反是因�???????? alv,blv必然异步，一高一�????????
 			if (CW_1 && CW_2) {
 				num++;
 				previousMillis = HAL_GetTick();
